@@ -61,7 +61,7 @@ class SenMLMeasurement(object):
         """Convert val to int if the value does not have any decimals, else convert to float"""
         if val is None or isinstance(val, (float, int)):
             return val
-        if float(val) == int(val):
+        if float(val) == int(float(val)):
             return int(val)
         return float(val)
 
