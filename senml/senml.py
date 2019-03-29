@@ -5,6 +5,7 @@ SenML Python object representation
 """
 
 import attr
+import time
 #try:
 #    import cbor
 #except ImportError:
@@ -33,10 +34,17 @@ class SenMLMeasurement(object):
             'unit': self.unit or base.unit,
             'sum':  self.sum,
         }
-        if  isinstance(self.value, (bool, bytes, str)):
+
+        if isinstance(self.value, (bool, bytes, str)):
             attrs['value'] = self.value
         elif self.value is not None:
             attrs['value'] = (base.value or 0) + (self.value or 0)
+
+        """Convert relative time to absolute time"""
+        t = ((base.time or 0) + (self.time or 0))
+        if t < 268435456:
+            epoch_time_now = time.time()
+            attrs['time'] = t + epoch_time_now
 
         ret = self.__class__(**attrs)
         return ret
@@ -75,6 +83,21 @@ class SenMLMeasurement(object):
             val = attrs.get(key, None)
             attrs[key] = cls.numeric(val)
 
+    @staticmethod
+    def is_valid(measurement, data):
+        """Check that name is not empty"""
+        if measurement.get('name') == "":
+            return False
+
+        """Check that a value key exist"""
+        if measurement.get("value") is None:
+            keys = ["bn", "bt", "bu", "bv", "bs", "bver"]
+            if any(key in data for key in keys):
+                return False
+            else:
+                raise Exception('Invalid SenML message')
+        return True
+
     @classmethod
     def from_json(cls, data):
         """Create an instance given JSON data as a dict"""
@@ -94,15 +117,17 @@ class SenMLMeasurement(object):
                 attrs['value'] = str(data['vs'])
             elif 'vb' in data:
                 if str(data['vb']).casefold() == 'false'.casefold() or \
-                    str(data['vb']).casefold() == '0'.casefold():
+                        str(data['vb']).casefold() == '0'.casefold():
                     attrs['value'] = False
                 else:
                     attrs['value'] = True
             elif 'vd' in data:
                 attrs['value'] = bytes(data['vd'])
 
-
-        return cls(**attrs)
+        if cls.is_valid(attrs, data):
+            return cls(**attrs)
+        return
+#        return cls(**attrs)
 
     def to_json(self):
         """Format the entry as a SenML+JSON object"""
@@ -130,6 +155,7 @@ class SenMLMeasurement(object):
 
         return ret
 
+
 class SenMLDocument(object):
     """A collection of SenMLMeasurement data points"""
 
@@ -152,7 +178,11 @@ class SenMLDocument(object):
         # Grab base information from first entry
         base = cls.measurement_factory.base_from_json(json_data[0])
 
-        measurements = [cls.measurement_factory.from_json(item) for item in json_data]
+        measurements = []
+        for item in json_data:
+            measurement = cls.measurement_factory.from_json(item)
+            if measurement is not None:
+                measurements.append(measurement)
 
         obj = cls(base=base, measurements=measurements)
 
