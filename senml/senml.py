@@ -21,6 +21,8 @@ class SenMLMeasurement(object):
     unit = attr.ib(default=None)
     value = attr.ib(default=None)
     sum = attr.ib(default=None)
+    update_time = attr.ib(default=None)
+    version = attr.ib(default=10)  # Is this correct place to specify a default value for version?
 
     def to_absolute(self, base):
         """Convert values to include the base information
@@ -32,8 +34,9 @@ class SenMLMeasurement(object):
             'name': (base.name or '') + (self.name or ''),
             'time': (base.time or 0) + (self.time or 0),
             'unit': self.unit or base.unit,
-            'sum':  self.sum,
         }
+        if base.sum or self.sum:  # If none of them exists, the field should not exist.
+            attrs['sum'] = (base.sum or 0) + (self.sum or 0)
 
         if isinstance(self.value, (bool, bytes, str)):
             attrs['value'] = self.value
@@ -54,10 +57,12 @@ class SenMLMeasurement(object):
         """Create a base instance from the given SenML data"""
         template = cls()
         attrs = {
-            'name':  data.get('bn', template.name),
-            'time':  data.get('bt', template.time),
-            'unit':  data.get('bu', template.unit),
-            'value': data.get('bv', template.value),
+            'name':    data.get('bn', template.name),
+            'time':    data.get('bt', template.time),
+            'unit':    data.get('bu', template.unit),
+            'value':   data.get('bv', template.value),
+            'sum':     data.get('bs', template.sum),
+            'version': data.get('bver', template.version),
         }
         # Convert to numeric types
         cls.clean_attrs(attrs)
@@ -79,7 +84,7 @@ class SenMLMeasurement(object):
         # This fixes common typing errors such as:
         # [{"bn":"asdf","bt":"1491918634"}]
         # (where the value for bt: is supposed to be a numeric type, not a string)
-        for key in ('time', 'sum', 'value'):
+        for key in ('time', 'sum', 'value', 'version'):
             val = attrs.get(key, None)
             attrs[key] = cls.numeric(val)
 
@@ -103,11 +108,12 @@ class SenMLMeasurement(object):
         """Create an instance given JSON data as a dict"""
         template = cls()
         attrs = {
-            'name':  data.get('n', template.name),
-            'time':  data.get('t', template.time),
-            'unit':  data.get('u', template.unit),
-            'value': data.get('v', template.value),
-            'sum':   data.get('s', template.sum),
+            'name':        data.get('n', template.name),
+            'time':        data.get('t', template.time),
+            'unit':        data.get('u', template.unit),
+            'value':       data.get('v', template.value),
+            'sum':         data.get('s', template.sum),
+            'update_time': data.get('ut', template.update_time)
         }
         # Convert to numeric types
         cls.clean_attrs(attrs)
@@ -123,11 +129,12 @@ class SenMLMeasurement(object):
                     attrs['value'] = True
             elif 'vd' in data:
                 attrs['value'] = bytes(data['vd'])
+        elif isinstance(attrs['value'], int):
+            attrs['value'] = float(attrs['value'])  # Comply with rfc8428 that the v field is for floating point.
 
         if cls.is_valid(attrs, data):
             return cls(**attrs)
-        return
-#        return cls(**attrs)
+        return None
 
     def to_json(self):
         """Format the entry as a SenML+JSON object"""
@@ -144,6 +151,9 @@ class SenMLMeasurement(object):
         if self.sum is not None:
             ret['s'] = self.numeric(self.sum)
 
+        if self.update_time is not None:
+            ret['ut'] = self.numeric(self.update_time)
+
         if isinstance(self.value, bool):
             ret['vb'] = self.value
         elif isinstance(self.value, bytes):
@@ -152,7 +162,8 @@ class SenMLMeasurement(object):
             ret['vs'] = self.value
         elif self.value is not None:
             ret['v'] = self.numeric(self.value)
-
+        elif self.sum is None:
+            raise Exception('Either a sum or a value has to be present in a record.')  # Is this correct?
         return ret
 
 
