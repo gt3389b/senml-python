@@ -40,7 +40,7 @@ class SenMLMeasurement(object):
 
         if isinstance(self.value, (bool, bytes, str)):
             attrs['value'] = self.value
-        elif self.value is not None:
+        elif (self.value or base.value) is not None:
             attrs['value'] = (base.value or 0) + (self.value or 0)
 
         """Convert relative time to absolute time"""
@@ -203,7 +203,7 @@ class SenMLDocument(object):
         """Return a JSON dict"""
         first = {
             # Add SenML version
-            'bver': 5,
+            'bver': 10,
         }
         if self.base:
             base = self.base
