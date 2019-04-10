@@ -22,7 +22,7 @@ class SenMLMeasurement(object):
     value = attr.ib(default=None)
     sum = attr.ib(default=None)
     update_time = attr.ib(default=None)
-    version = attr.ib(default=10)  # Is this correct place to specify a default value for version?
+    version = attr.ib(default=None)
 
     def to_absolute(self, base):
         """Convert values to include the base information
@@ -34,6 +34,7 @@ class SenMLMeasurement(object):
             'name': (base.name or '') + (self.name or ''),
             'time': (base.time or 0) + (self.time or 0),
             'unit': self.unit or base.unit,
+            'update_time': self.update_time,
         }
         if base.sum or self.sum:  # If none of them exists, the field should not exist.
             attrs['sum'] = (base.sum or 0) + (self.sum or 0)
@@ -48,12 +49,13 @@ class SenMLMeasurement(object):
         if t < 268435456:
             epoch_time_now = time.time()
             attrs['time'] = t + epoch_time_now
-
+        else:
+            attrs['time'] = t
         ret = self.__class__(**attrs)
         return ret
 
     @classmethod
-    def base_from_json(cls, data):
+    def base_from_json(cls, data, version_set):
         """Create a base instance from the given SenML data"""
         template = cls()
         attrs = {
@@ -66,8 +68,31 @@ class SenMLMeasurement(object):
         }
         # Convert to numeric types
         cls.clean_attrs(attrs)
+        base_version = attrs.get('version')
+        if base_version and version_set is not None:
+            version_set.add(base_version)
 
         return cls(**attrs)
+
+    @classmethod
+    def update_base(cls, base, record, version_set):
+        new_base = cls.base_from_json(record, version_set)
+        if base is None:
+            return new_base
+
+        if new_base.name is not None:
+            base.name = new_base.name
+        if new_base.time is not None:
+            base.time = new_base.time
+        if new_base.unit is not None:
+            base.unit = new_base.unit
+        if new_base.value is not None:
+            base.value = new_base.value
+        if new_base.sum is not None:
+            base.sum = new_base.sum
+        if new_base.version is not None:
+            base.version = new_base.version
+        return base
 
     @staticmethod
     def numeric(val):
@@ -154,6 +179,9 @@ class SenMLMeasurement(object):
         if self.update_time is not None:
             ret['ut'] = self.numeric(self.update_time)
 
+        if self.version is not None:
+            ret['bver'] = self.version
+
         if isinstance(self.value, bool):
             ret['vb'] = self.value
         elif isinstance(self.value, bytes):
@@ -172,13 +200,12 @@ class SenMLDocument(object):
 
     measurement_factory = SenMLMeasurement
 
-    def __init__(self, measurements=None, *args, base=None, **kwargs):
+    def __init__(self, measurements=None, *args, **kwargs):
         """Constructor"""
         super().__init__(*args, **kwargs)
         if measurements is None:
             measurements = []
         self.measurements = measurements
-        self.base = base
 
     @classmethod
     def from_json(cls, json_data):
@@ -186,40 +213,37 @@ class SenMLDocument(object):
 
         @param[in] json_data  JSON list, from json.loads(senmltext)
         """
-        # Grab base information from first entry
-        base = cls.measurement_factory.base_from_json(json_data[0])
-
+        base = None
         measurements = []
-        for item in json_data:
-            measurement = cls.measurement_factory.from_json(item)
+        version_set = set()
+        for record in json_data:
+            base = cls.measurement_factory.update_base(base, record, version_set)
+            measurement = cls.measurement_factory.from_json(record)
             if measurement is not None:
-                measurements.append(measurement)
+                measurements.append(measurement.to_absolute(base))
 
-        obj = cls(base=base, measurements=measurements)
+        if len(version_set) > 1:
+            raise ValueError(f'Multiple base version detected {version_set}')
+        elif len(version_set) == 1:
+            version = version_set.pop()
+            if version < 10:
+                for measurement in measurements:
+                    measurement.version = version
+            else:  # If version is higher that 10 the measurements are rejected.
+                measurements = []
+
+        if len(measurements) > 0:
+            ordered_measurements = sorted(measurements, key=lambda x: x.time)
+            obj = cls(measurements=ordered_measurements)
+        else:
+            obj = cls()
 
         return obj
 
     def to_json(self):
         """Return a JSON dict"""
-        first = {
-            # Add SenML version
-            'bver': 10,
-        }
-        if self.base:
-            base = self.base
-            if base.name is not None:
-                first['bn'] = str(base.name)
-            if base.time is not None:
-                first['bt'] = float(base.time)
-            if base.unit is not None:
-                first['bu'] = str(base.unit)
-            if base.value is not None:
-                first['bv'] = float(base.value)
 
         if self.measurements:
-            first.update(self.measurements[0].to_json())
-            ret = [first]
-            ret.extend([item.to_json() for item in self.measurements[1:]])
+            return [item.to_json() for item in self.measurements]
         else:
-            ret = []
-        return ret
+            return []
