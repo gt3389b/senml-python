@@ -41,7 +41,7 @@ class SenMLMeasurement(object):
 
         if isinstance(self.value, (bool, bytes, str)):
             attrs['value'] = self.value
-        elif (self.value or base.value) is not None:
+        elif (self.value is not None) or (base.value is not None):
             attrs['value'] = (base.value or 0) + (self.value or 0)
 
         """Convert relative time to absolute time"""
