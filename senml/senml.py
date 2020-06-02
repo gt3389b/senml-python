@@ -188,6 +188,31 @@ class SenMLDocument(object):
 
         return obj
 
+    def to_absolute(self):
+        """Return a JSON dict"""
+        first = {
+            # Add SenML version
+            'bver': 5,
+        }
+        if self.base:
+            base = self.base
+            if base.name is not None:
+                first['bn'] = str(base.name)
+            if base.time is not None:
+                first['bt'] = float(base.time)
+            if base.unit is not None:
+                first['bu'] = str(base.unit)
+            if base.value is not None:
+                first['bv'] = float(base.value)
+
+        if self.measurements:
+            first.update(self.measurements[0].to_absolute(self.base).to_json())
+            ret = [first]
+            ret.extend([item.to_absolute(self.base).to_json() for item in self.measurements[1:]])
+        else:
+            ret = []
+        return ret
+
     def to_json(self):
         """Return a JSON dict"""
         first = {
